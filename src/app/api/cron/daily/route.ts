@@ -17,3 +17,6 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "failed" }, { status: 500 });
   }
 }
+
+/** Vercel Cron sends GET with the same `Authorization: Bearer $CRON_SECRET` header. */
+export const GET = POST;
