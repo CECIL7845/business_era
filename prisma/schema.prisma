@@ -1,0 +1,450 @@
+// Businestra data model.
+// Conventions:
+//  - All money is stored as integer pesewas (1 GHS = 100 pesewas). Never floats.
+//  - Every tenant-owned row carries businessId and every query MUST filter by it.
+//  - Timestamps are stored in UTC; display uses Africa/Accra (UTC+0, no DST).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Identity ─────────────────────────────
+
+model User {
+  id               String    @id @default(cuid())
+  email            String    @unique // stored lower-cased
+  name             String
+  phone            String? // E.164 (+233...)
+  passwordHash     String
+  emailVerifiedAt  DateTime?
+  isPlatformAdmin  Boolean   @default(false)
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  sessions    Session[]
+  memberships Membership[]
+  tokens      AuthToken[]
+}
+
+model Session {
+  id               String   @id // sha256(token) — the raw token only lives in the cookie
+  userId           String
+  activeBusinessId String?
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+  userAgent        String?
+  ip               String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum AuthTokenType {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  type      AuthTokenType
+  tokenHash String        @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+// ───────────────────────────── Tenancy ─────────────────────────────
+
+model Business {
+  id                String   @id @default(cuid())
+  name              String
+  phone             String?
+  email             String?
+  address           String?
+  city              String?
+  tin               String? // GRA Taxpayer Identification Number (optional)
+  invoicePrefix     String   @default("INV")
+  receiptPrefix     String   @default("RCT")
+  nextInvoiceNumber Int      @default(1)
+  nextReceiptNumber Int      @default(1)
+  defaultCreditDays Int      @default(14)
+  isDemo            Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  memberships    Membership[]
+  invitations    Invitation[]
+  customers      Customer[]
+  products       Product[]
+  invoices       Invoice[]
+  payments       Payment[]
+  stockMovements StockMovement[]
+  subscription   Subscription?
+  billingTxns    BillingTransaction[]
+  auditLogs      AuditLog[]
+  feedback       Feedback[]
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  SALES
+  VIEWER
+}
+
+model Membership {
+  id         String   @id @default(cuid())
+  userId     String
+  businessId String
+  role       Role
+  createdAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  assignedCustomers Customer[]
+
+  @@unique([userId, businessId])
+  @@index([businessId])
+}
+
+model Invitation {
+  id          String    @id @default(cuid())
+  businessId  String
+  email       String
+  role        Role
+  tokenHash   String    @unique
+  invitedById String
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+// ───────────────────────────── Trade credit ─────────────────────────────
+
+model Customer {
+  id               String   @id @default(cuid())
+  businessId       String
+  name             String // shop / business name
+  contactName      String?
+  phone            String? // E.164
+  location         String?
+  creditLimit      Int      @default(0) // pesewas; 0 = no credit allowed
+  paymentTermsDays Int      @default(14)
+  notes            String?
+  isActive         Boolean  @default(true)
+  assignedToId     String? // Membership id of the rep responsible
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  business   Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignedTo Membership? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  invoices   Invoice[]
+  payments   Payment[]
+
+  @@index([businessId, name])
+  @@index([businessId, phone])
+}
+
+model Product {
+  id           String   @id @default(cuid())
+  businessId   String
+  name         String
+  sku          String?
+  unit         String   @default("unit") // e.g. carton, bag, crate
+  unitPrice    Int // pesewas
+  costPrice    Int? // pesewas
+  stockQty     Int      @default(0)
+  reorderLevel Int      @default(0)
+  trackStock   Boolean  @default(true)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  business  Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  items     InvoiceItem[]
+  movements StockMovement[]
+
+  @@unique([businessId, sku])
+  @@index([businessId, name])
+}
+
+enum StockReason {
+  SALE
+  RESTOCK
+  ADJUSTMENT
+  SALE_VOID
+}
+
+model StockMovement {
+  id          String      @id @default(cuid())
+  businessId  String
+  productId   String
+  change      Int
+  reason      StockReason
+  note        String?
+  invoiceId   String?
+  createdById String
+  createdAt   DateTime    @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, productId, createdAt])
+}
+
+enum InvoiceStatus {
+  ISSUED
+  VOID
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  businessId  String
+  number      String
+  customerId  String
+  issueDate   DateTime
+  dueDate     DateTime
+  subtotal    Int
+  discount    Int           @default(0)
+  total       Int
+  amountPaid  Int           @default(0) // maintained transactionally from allocations
+  status      InvoiceStatus @default(ISSUED)
+  notes       String?
+  createdById String
+  voidedAt    DateTime?
+  voidedById  String?
+  voidReason  String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  business    Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  items       InvoiceItem[]
+  allocations PaymentAllocation[]
+
+  @@unique([businessId, number])
+  @@index([businessId, customerId, status])
+  @@index([businessId, dueDate])
+  @@index([businessId, issueDate])
+}
+
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  productId   String?
+  description String
+  quantity    Int
+  unitPrice   Int
+  lineTotal   Int
+
+  invoice Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+}
+
+enum PaymentMethod {
+  CASH
+  MOMO
+  BANK
+  CHEQUE
+}
+
+enum PaymentStatus {
+  RECORDED
+  VOID
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  businessId    String
+  customerId    String
+  receiptNumber String
+  amount        Int
+  method        PaymentMethod
+  reference     String? // MoMo txn id, cheque no., bank ref
+  receivedAt    DateTime
+  notes         String?
+  status        PaymentStatus @default(RECORDED)
+  recordedById  String
+  voidedAt      DateTime?
+  voidedById    String?
+  voidReason    String?
+  createdAt     DateTime      @default(now())
+
+  business    Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  allocations PaymentAllocation[]
+
+  @@unique([businessId, receiptNumber])
+  @@index([businessId, customerId])
+  @@index([businessId, receivedAt])
+}
+
+model PaymentAllocation {
+  id        String @id @default(cuid())
+  paymentId String
+  invoiceId String
+  amount    Int
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
+}
+
+// ───────────────────────────── Billing ─────────────────────────────
+
+model Plan {
+  code         String   @id // STARTER | GROWTH | PRO
+  name         String
+  priceMonthly Int // pesewas
+  priceAnnual  Int // pesewas
+  maxUsers     Int
+  maxCustomers Int // -1 = unlimited
+  canExport    Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  updatedAt    DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE // inside grace period after currentPeriodEnd
+  EXPIRED // read-only
+  CANCELED // owner cancelled; read-only after period end
+}
+
+enum BillingInterval {
+  MONTHLY
+  ANNUAL
+}
+
+model Subscription {
+  id                String             @id @default(cuid())
+  businessId        String             @unique
+  planCode          String
+  status            SubscriptionStatus
+  interval          BillingInterval    @default(MONTHLY)
+  trialEndsAt       DateTime?
+  currentPeriodEnd  DateTime?
+  cancelAtPeriodEnd Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  plan     Plan     @relation(fields: [planCode], references: [code])
+}
+
+enum BillingTxnStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  ABANDONED
+}
+
+model BillingTransaction {
+  id            String           @id @default(cuid())
+  businessId    String
+  reference     String           @unique
+  provider      String           @default("paystack")
+  planCode      String
+  interval      BillingInterval
+  amount        Int // pesewas expected
+  currency      String           @default("GHS")
+  status        BillingTxnStatus @default(PENDING)
+  channel       String?
+  receiptNumber String?          @unique
+  paidAt        DateTime?
+  appliedAt     DateTime? // when the subscription extension was applied (idempotency guard)
+  failureReason String?
+  initiatedById String
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+}
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventKey    String // provider event id or sha256 of body
+  eventType   String
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  error       String?
+
+  @@unique([provider, eventKey])
+}
+
+// ───────────────────────────── Platform ─────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  businessId String?
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model RateLimit {
+  key         String   @id
+  count       Int
+  windowStart DateTime
+}
+
+enum FeedbackStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+}
+
+model Feedback {
+  id         String         @id @default(cuid())
+  businessId String?
+  userId     String?
+  category   String
+  message    String
+  status     FeedbackStatus @default(NEW)
+  createdAt  DateTime       @default(now())
+
+  business Business? @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+}

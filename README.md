@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Businestra
 
-## Getting Started
+Credit sales and collections software for **wholesalers and distributors in Ghana**. It tracks what every retailer owes, enforces credit limits, records cash, MoMo, bank and cheque collections, produces statements and receipts, and shows who to chase today. It is multi-tenant SaaS with GHS subscription billing through Paystack.
 
-First, run the development server:
+> **Status: MVP, ready for a *controlled pilot* once the items in [DEPLOYMENT.md § Go-live checklist](DEPLOYMENT.md#go-live-checklist) are done.** The business case is **not yet validated**. See [CUSTOMER_VALIDATION.md](CUSTOMER_VALIDATION.md).
+
+## Documentation
+
+| Doc | What's in it |
+|---|---|
+| [BUSINESS_MODEL.md](BUSINESS_MODEL.md) | Research, opportunity scorecard, pricing hypotheses, unit economics, 90-day plan |
+| [CUSTOMER_VALIDATION.md](CUSTOMER_VALIDATION.md) | Interview script, demo, pilot terms, go/no-go criteria, outreach messages |
+| [PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md) | MVP scope, user roles, workflows, out-of-scope items |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Stack, data model, tenancy, ledger design, billing flow |
+| [SECURITY.md](SECURITY.md) | Controls implemented, known gaps, compliance notes |
+| [TESTING.md](TESTING.md) | How to run tests and what they cover |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Hosting, environment, backups and restore, rollback, runbook, go-live checklist |
+| [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | What's done, what's next |
+
+## Quick start (local)
+
+Requirements: Node 20.9+ (tested on 24) and PostgreSQL 14+ (tested on 18).
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install                        # also generates the Prisma client
+cp .env.example .env               # then fill in DATABASE_URL and TEST_DATABASE_URL
+npx prisma migrate dev             # create tables
+SEED_DEMO=1 npm run db:seed        # plans + a dev demo login (demo@businestra.local / demo-password-1)
+npm run dev                        # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+In development, emails such as verification, password reset and invitations are printed to the server console when `SMTP_URL` is empty.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+To make yourself a platform admin (for `/admin`):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+SEED_ADMIN_EMAIL=you@example.com SEED_ADMIN_PASSWORD='a-long-password' npm run db:seed
+```
 
-## Learn More
+## Scripts
 
-To learn more about Next.js, take a look at the following resources:
+| Command | Purpose |
+|---|---|
+| `npm run dev` | Development server |
+| `npm run build` / `npm start` | Production build / serve |
+| `npm run lint` · `npm run typecheck` | Static checks |
+| `npm test` | Unit and integration tests (Vitest, real Postgres test DB) |
+| `npm run test:e2e` | Browser end-to-end tests (Playwright; run `npm run build` first) |
+| `npm run db:migrate` · `npm run db:deploy` | Create migration (dev) / apply migrations (prod) |
+| `npm run db:seed` | Seed plans and optional admin or demo |
+| `npm run cron:daily` | Run daily jobs: subscription status, renewal reminders, payment reconciliation, cleanup |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tech
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Next.js 16 (App Router, Server Actions), React 19, TypeScript, Prisma 7 + PostgreSQL, Tailwind CSS 4, Zod, Vitest, Playwright. Payments go through Paystack.
