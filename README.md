@@ -4,6 +4,12 @@ Credit sales and collections software for **wholesalers and distributors in Ghan
 
 > **Status: MVP, ready for a *controlled pilot* once the items in [DEPLOYMENT.md § Go-live checklist](DEPLOYMENT.md#go-live-checklist) are done.** The business case is **not yet validated**. See [CUSTOMER_VALIDATION.md](CUSTOMER_VALIDATION.md).
 
+## How it works
+
+**Tenancy.** Every tenant-owned row carries a `businessId`, and every query filters on it. The `businessId` is taken from the user's server-side session and verified membership, never from the request. Each action also checks the user's role before it runs.
+
+**Ledger and partial payments.** Money is stored as whole pesewas. Payments are applied to a customer's invoices oldest-due first, so one payment can settle one invoice and partly pay the next. Anything left over becomes customer credit. Every invoice or payment change locks the customer's row and recalculates all of their allocations in a single transaction.
+
 ## Documentation
 
 | Doc | What's in it |
